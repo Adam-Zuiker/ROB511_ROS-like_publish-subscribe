@@ -1,0 +1,223 @@
+"""
+heap.py — A hand-rolled binary min-heap.
+
+This module deliberately does NOT use Python's built-in `heapq` module.
+The assignment's stated learning goal is to "implement numeric binary
+min-heap operations," so this file builds the two fundamental primitives —
+sift-up and sift-down — from scratch, and every other operation
+(`heapify`, `heap_push`, `heap_pop`, `heap_sort`) is written in terms of
+those two.
+
+--------------------------------------------------------------------------
+THE BINARY MIN-HEAP INVARIANT
+--------------------------------------------------------------------------
+A binary min-heap is a *complete* binary tree (every level full except
+possibly the last, which fills left-to-right) stored implicitly in a flat
+Python list, maintaining one property at all times:
+
+    heap[i] <= heap[2*i + 1]   (left child, if it exists)
+    heap[i] <= heap[2*i + 2]   (right child, if it exists)
+
+Because the tree is stored as a flat array rather than as linked nodes, we
+can compute "parent of i" and "children of i" with pure arithmetic — no
+pointers needed:
+
+    parent(i) = (i - 1) // 2
+    left(i)   = 2*i + 1
+    right(i)  = 2*i + 2
+
+The invariant only constrains a node relative to its *children*, not to
+its siblings or to nodes elsewhere in the tree — so many different array
+layouts can be valid heaps for the same multiset of values. That's why the
+project spec says "any valid heap layout is accepted": there is no single
+canonical heap for a given input.
+
+The invariant guarantees `heap[0]` (the root) is always the minimum
+element, which is what makes a heap useful as a priority queue: "give me
+the smallest item" is an O(1) lookup, at the cost of O(log n) work to
+restore the invariant whenever the heap's contents change.
+"""
+
+from __future__ import annotations
+
+from typing import List, Sequence, Union
+
+# Heap entries in this project are always plain numbers (the spec's
+# /heapify and /heap_sort both operate on numeric arrays), so we use a
+# simple numeric type alias rather than a generic/comparable type parameter.
+Number = Union[int, float]
+
+
+def _parent(index: int) -> int:
+    return (index - 1) // 2
+
+
+def _left(index: int) -> int:
+    return 2 * index + 1
+
+
+def _right(index: int) -> int:
+    return 2 * index + 2
+
+
+def sift_up(heap: List[Number], index: int) -> None:
+    """Restore the heap invariant by moving `heap[index]` *up* toward the
+    root, swapping with its parent as long as it is smaller than its parent.
+
+    When is this needed? Only in one situation: a new element was just
+    appended at the *end* of the array (index `len(heap) - 1`). Every other
+    position in the tree already satisfies the invariant; only the
+    brand-new leaf might be smaller than its parent, so we only ever need
+    to look upward from it, never sideways or back down.
+
+    Cost: the tree has height O(log n), and each step here is O(1) work
+    (one comparison, maybe one swap), so this is O(log n) in the worst
+    case — the new element sifts all the way from a leaf to the root.
+    """
+    while index > 0:
+        parent = _parent(index)
+        if heap[index] < heap[parent]:
+            heap[index], heap[parent] = heap[parent], heap[index]
+            index = parent
+        else:
+            # The element is no longer smaller than its parent, so the
+            # invariant holds on this branch; nothing further up the tree
+            # could still be violated by this particular move.
+            break
+
+
+def sift_down(heap: List[Number], index: int, size: Union[int, None] = None) -> None:
+    """Restore the heap invariant by moving `heap[index]` *down* toward the
+    leaves: repeatedly swap with the smaller of its two children until it
+    is no longer larger than either (or it has no children left).
+
+    `size` lets a caller treat only `heap[:size]` as "live" heap data while
+    leaving the tail of the underlying list untouched — used by
+    `heap_sort` below, which repeatedly moves the current minimum to the
+    *end* of the array and then shrinks the "live" region by one, instead
+    of allocating a new list on every extraction.
+
+    When is this needed? Two situations, both of which replace
+    `heap[index]` with some value that has no known relationship to the
+    rest of the tree: (1) after popping the root, when the last element is
+    moved into its place, and (2) as the core subroutine `heapify` calls
+    repeatedly, working from the bottom of the tree upward, to build a
+    heap out of an arbitrary array.
+
+    Cost: O(log n) worst case, by the same reasoning as `sift_up` — height
+    of the tree, O(1) work per level.
+    """
+    n = len(heap) if size is None else size
+    while True:
+        left, right = _left(index), _right(index)
+        smallest = index
+        if left < n and heap[left] < heap[smallest]:
+            smallest = left
+        if right < n and heap[right] < heap[smallest]:
+            smallest = right
+        if smallest == index:
+            # Neither child is smaller than the current node: the
+            # invariant holds here, and (by induction) in the subtrees
+            # below it, since we haven't touched them and they were valid
+            # heaps before this call started.
+            return
+        heap[index], heap[smallest] = heap[smallest], heap[index]
+        index = smallest
+
+
+def heapify(items: Sequence[Number]) -> List[Number]:
+    """Return a new list containing the same multiset as `items`, arranged
+    to satisfy the binary min-heap invariant everywhere.
+
+    Naively, you could build a heap by starting from an empty list and
+    calling something like `heap_push` once per item: n pushes, each up to
+    O(log n), for O(n log n) total. Instead we use the classic "Floyd
+    build-heap" trick, which runs in O(n):
+
+    Every index from `len(items) // 2` onward is a *leaf* (it has no
+    children, because `2*i + 1 >= len(items)`), and a single element on
+    its own trivially satisfies the heap invariant. So we only need to fix
+    up the *internal* nodes, and we do it in reverse — from the last
+    internal node back to the root — calling `sift_down` at each one.
+
+    Why does bottom-up order make each `sift_down` call correct? Because
+    by the time `sift_down(heap, i, n)` runs, both of node `i`'s child
+    subtrees have *already* been fixed by earlier iterations (we visit
+    higher indices first), so they are already valid heaps in their own
+    right — exactly the precondition `sift_down` needs to work correctly.
+
+    (The O(n) bound — rather than the more obvious-looking O(n log n) you
+    might expect from "n calls to an O(log n) function" — is a classic
+    amortized-analysis result: most nodes sit near the bottom of the tree
+    and only sift down a short distance, so the total work is dominated by
+    the many-but-cheap lower levels rather than the few-but-expensive
+    upper ones. You don't need to re-derive this to use the algorithm, but
+    it's why build-heap beats n individual pushes.)
+    """
+    heap = list(items)
+    n = len(heap)
+    for index in reversed(range(n // 2)):
+        sift_down(heap, index, n)
+    return heap
+
+
+def heap_push(heap: List[Number], item: Number) -> None:
+    """Insert `item` into `heap` in place, preserving the invariant.
+
+    Appending to the end of the array is the only way to add a new leaf to
+    a *complete* binary tree without leaving a gap partway through the
+    array, so we always append first, then let `sift_up` walk the new
+    element up to wherever it belongs.
+    """
+    heap.append(item)
+    sift_up(heap, len(heap) - 1)
+
+
+def heap_pop(heap: List[Number]) -> Number:
+    """Remove and return the minimum element (`heap[0]`) in place,
+    preserving the invariant for whatever remains.
+
+    We can't simply delete index 0: removing from the *front* of a Python
+    list is O(n) (every remaining element shifts left), and, more
+    importantly, doing so naively wouldn't preserve the complete-tree
+    shape the heap relies on. Instead: move the *last* element into the
+    root's position (an O(1) move that keeps the tree complete, since
+    we're removing the very last leaf), shrink the list by one, then
+    `sift_down` from the root to fix the one spot that might now violate
+    the invariant.
+    """
+    if not heap:
+        raise IndexError("heap_pop from an empty heap")
+    minimum = heap[0]
+    last = heap.pop()  # removes and returns the last element, O(1)
+    if heap:
+        heap[0] = last
+        sift_down(heap, 0)
+    return minimum
+
+
+def heap_sort(items: Sequence[Number]) -> List[Number]:
+    """Return a new list containing the same multiset as `items`, in
+    ascending order.
+
+    Approach: build a min-heap in O(n) via `heapify`, then repeatedly pop
+    the minimum. Each pop is O(log n) and we do it n times, so the overall
+    cost is O(n log n) — the same asymptotic cost as Python's built-in
+    `sorted()`, but built here from our own heap primitives per the
+    assignment's learning goal, and reused directly by the A* planner
+    later to order its search frontier by priority (per the spec:
+    "/heap_sort is both a public service and a required A* dependency").
+
+    Note this uses a different in-memory strategy than the classic
+    textbook "heapsort" (which sorts *in place* using a max-heap and swaps
+    the current maximum to the end of the array on each step). We instead
+    build a fresh min-heap and pop from it into a new list, which is
+    simpler to reason about and equally valid: the spec only constrains
+    observable input/output behavior (full input multiset preserved,
+    ascending order), not the internal algorithm shape.
+    """
+    heap = heapify(items)
+    result: List[Number] = []
+    while heap:
+        result.append(heap_pop(heap))
+    return result

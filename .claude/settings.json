@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make build *)",
+      "Bash(python3 -m unittest tests.test_heap -v)",
+      "Bash(python3 -m unittest tests.test_gateway -v)",
+      "Bash(make clean *)",
+      "Bash(python3 -m unittest tests.test_heap tests.test_gateway)"
+    ]
+  }
+}
