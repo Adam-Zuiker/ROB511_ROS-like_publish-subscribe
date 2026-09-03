@@ -85,11 +85,27 @@ def _right(index: int) -> int:
 
 
 def sift_up(heap: List[Number], index: int) -> None:
-    raise NotImplementedError
-
+    while index and heap[index] < heap[_parent(index)]:
+        parent_idx = _parent[index]
+        heap[index], heap[parent_idx] = heap[parent_idx], heap[index]
+        index = parent_idx
 
 def sift_down(heap: List[Number], index: int, size: Union[int, None] = None) -> None:
-    raise NotImplementedError
+    if size is None:
+        size = len(heap)
+    while _left(index) < size:
+        left_idx = _left(index)
+        if _right(index) < size:
+            right_idx = _right(index)
+            smaller_child_idx = left_idx if heap[left_idx] < heap[right_idx] else right_idx
+        else:
+            smaller_child_idx = left_idx
+        if heap[index] > heap[smaller_child_idx]:
+            heap[index], heap[smaller_child_idx] = heap[smaller_child_idx], heap[index]
+        else:
+            break
+        index = smaller_child_idx
+
 
 
 def heapify(items: Sequence[Number]) -> List[Number]:
