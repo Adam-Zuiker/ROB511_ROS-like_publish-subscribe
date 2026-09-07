@@ -86,7 +86,7 @@ def _right(index: int) -> int:
 
 def sift_up(heap: List[Number], index: int) -> None:
     while index and heap[index] < heap[_parent(index)]:
-        parent_idx = _parent[index]
+        parent_idx = _parent(index)
         heap[index], heap[parent_idx] = heap[parent_idx], heap[index]
         index = parent_idx
 

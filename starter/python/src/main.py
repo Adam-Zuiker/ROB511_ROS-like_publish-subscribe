@@ -42,6 +42,7 @@ import signal
 import sys
 
 import logging_setup
+import map_store
 from broker import Broker
 from server import TCPServer
 from services import register_builtin_services
@@ -53,7 +54,9 @@ def main() -> int:
     logging_setup.configure()
 
     broker = Broker()
-    providers = register_builtin_services(broker)
+    store = map_store.register(broker)
+    log.info("subscribed to /map")
+    providers = register_builtin_services(broker, store)
     log.info("registered built-in services: %s", ", ".join(p.id for p in providers))
 
     server = TCPServer(broker)
