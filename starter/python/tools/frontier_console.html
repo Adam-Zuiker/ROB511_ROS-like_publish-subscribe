@@ -1,0 +1,720 @@
+<title>Frontier Console</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #eef1f6;
+    --panel: #ffffff;
+    --panel-2: #f6f8fb;
+    --line: #d7dee8;
+    --ink: #1b2330;
+    --muted: #62708a;
+    --accent: #c9701f;
+    --accent-ink: #ffffff;
+    --frontier: #2f9aa6;
+    --visited: #aab6c9;
+    --wall: #202733;
+    --path: #d99a1b;
+    --start: #2f8f52;
+    --goal: #c14a51;
+    --focus: #2f9aa6;
+    --shadow: 0 1px 2px rgba(20, 30, 50, 0.06), 0 8px 24px -12px rgba(20, 30, 50, 0.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e131b;
+      --panel: #161d29;
+      --panel-2: #10161f;
+      --line: #2a3444;
+      --ink: #e8ecf2;
+      --muted: #8592a8;
+      --accent: #e0913f;
+      --accent-ink: #17110a;
+      --frontier: #4fb3bf;
+      --visited: #3a4658;
+      --wall: #05070a;
+      --path: #f2c14e;
+      --start: #5fbf7a;
+      --goal: #d9636b;
+      --focus: #4fb3bf;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0e131b;
+    --panel: #161d29;
+    --panel-2: #10161f;
+    --line: #2a3444;
+    --ink: #e8ecf2;
+    --muted: #8592a8;
+    --accent: #e0913f;
+    --accent-ink: #17110a;
+    --frontier: #4fb3bf;
+    --visited: #3a4658;
+    --wall: #05070a;
+    --path: #f2c14e;
+    --start: #5fbf7a;
+    --goal: #d9636b;
+    --focus: #4fb3bf;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    gap: 0.9rem;
+    padding: 1.1rem 1.5rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    flex-wrap: wrap;
+  }
+
+  .masthead h1 {
+    font-family: "Chakra Petch", ui-sans-serif, sans-serif;
+    font-weight: 700;
+    font-size: 1.35rem;
+    letter-spacing: 0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .masthead .tagline {
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  .masthead .spacer { flex: 1; }
+
+  .theme-note {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+  }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 1.25rem;
+    padding: 1.25rem 1.5rem 1.75rem;
+    max-width: 1280px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  @media (max-width: 880px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  .stage {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    min-width: 0;
+  }
+
+  .stage-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .toolbar {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .tool-btn {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    padding: 0.4rem 0.65rem;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--ink);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .tool-btn .swatch {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 2px;
+    display: inline-block;
+  }
+
+  .tool-btn[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+
+  .tool-btn:focus-visible, .xport-btn:focus-visible, input[type="range"]:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .canvas-wrap {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--panel-2);
+  }
+
+  .hint {
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 0;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 0.95rem 1rem;
+  }
+
+  .panel h2 {
+    font-family: "Chakra Petch", ui-sans-serif, sans-serif;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    margin: 0 0 0.7rem;
+    font-weight: 600;
+  }
+
+  .transport {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.8rem;
+  }
+
+  .xport-btn {
+    flex: 1;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.78rem;
+    padding: 0.5rem 0.4rem;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .xport-btn.primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .xport-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .speed-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.74rem;
+    color: var(--muted);
+  }
+
+  .speed-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+
+  .legend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem 0.7rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.74rem;
+  }
+
+  .legend-row { display: flex; align-items: center; gap: 0.45rem; }
+
+  .legend-swatch {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 2px;
+    flex-shrink: 0;
+    border: 1px solid var(--line);
+  }
+
+  .telemetry dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.35rem 0.7rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.8rem;
+  }
+
+  .telemetry dt { color: var(--muted); }
+  .telemetry dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+
+  .telemetry dd.status-found { color: var(--start); }
+  .telemetry dd.status-none { color: var(--goal); }
+  .telemetry dd.status-running { color: var(--frontier); }
+
+  .info-json {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    line-height: 1.55;
+    color: var(--muted);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.6rem 0.7rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .info-json .key { color: var(--frontier); }
+  .info-json .val { color: var(--ink); }
+
+  footer {
+    text-align: center;
+    padding: 1rem 1.5rem 1.5rem;
+    color: var(--muted);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+  }
+
+  footer a { color: var(--accent); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<header class="masthead">
+  <h1>Frontier Console</h1>
+  <span class="tagline">A* over an occupancy grid — full-frontier heap_sort, one iteration at a time</span>
+  <span class="spacer"></span>
+  <span class="theme-note" id="themeNote"></span>
+</header>
+
+<main>
+  <section class="stage" aria-label="Grid editor and search animation">
+    <div class="stage-head">
+      <div class="toolbar" role="group" aria-label="Editing tools">
+        <button class="tool-btn" id="toolWall" aria-pressed="true"><span class="swatch" style="background:var(--wall)"></span>Wall</button>
+        <button class="tool-btn" id="toolErase" aria-pressed="false"><span class="swatch" style="background:var(--panel-2);border:1px solid var(--line)"></span>Erase</button>
+        <button class="tool-btn" id="toolStart" aria-pressed="false"><span class="swatch" style="background:var(--start)"></span>Start</button>
+        <button class="tool-btn" id="toolGoal" aria-pressed="false"><span class="swatch" style="background:var(--goal)"></span>Goal</button>
+      </div>
+      <div class="toolbar">
+        <button class="tool-btn" id="btnMaze">Random maze</button>
+        <button class="tool-btn" id="btnClear">Clear walls</button>
+      </div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="grid" width="900" height="600" role="img" aria-label="Occupancy grid editor"></canvas>
+    </div>
+    <p class="hint">Click or drag to paint with the selected tool · grid is 30×20 cells, resolution 1.0</p>
+  </section>
+
+  <aside class="sidebar">
+    <div class="panel">
+      <h2>Transport</h2>
+      <div class="transport">
+        <button class="xport-btn primary" id="btnRun">▶ Run</button>
+        <button class="xport-btn" id="btnStep">Step</button>
+        <button class="xport-btn" id="btnReset">Reset</button>
+      </div>
+      <div class="speed-row">
+        <span>slow</span>
+        <input type="range" id="speed" min="1" max="200" value="60" aria-label="Playback speed">
+        <span>fast</span>
+      </div>
+    </div>
+
+    <div class="panel telemetry">
+      <h2>Telemetry</h2>
+      <dl>
+        <dt>status</dt><dd id="tStatus" class="status-running">idle</dd>
+        <dt>iteration</dt><dd id="tIter">0</dd>
+        <dt>frontier size</dt><dd id="tFrontier">0</dd>
+        <dt>expanded</dt><dd id="tExpanded">0</dd>
+        <dt>heap_sort calls</dt><dd id="tResorts">0</dd>
+        <dt>current cell</dt><dd id="tCurrent">—</dd>
+        <dt>g / h / f</dt><dd id="tGhf">—</dd>
+        <dt>path length</dt><dd id="tPath">—</dd>
+      </dl>
+    </div>
+
+    <div class="panel">
+      <h2>Legend</h2>
+      <div class="legend">
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--start)"></span>start</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--goal)"></span>goal</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--wall)"></span>occupied</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--frontier)"></span>frontier</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--visited)"></span>expanded</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--path)"></span>path</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>/map info</h2>
+      <div class="info-json" id="mapInfo"></div>
+    </div>
+  </aside>
+</main>
+
+<footer>frontier console — mirrors a full frontier re-sort each iteration (f = g + manhattan), lexicographic tie-break by (x, y), matching a hand-rolled heap_sort–driven A*, not an incremental priority queue.</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var COLS = 30, ROWS = 20;
+  var canvas = document.getElementById("grid");
+  var ctx = canvas.getContext("2d");
+  var cell = canvas.width / COLS;
+
+  function token(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  // ---- Grid model -----------------------------------------------------
+  var walls = new Set();          // "x,y" -> occupied
+  var start = { x: 2, y: 10 };
+  var goal = { x: 27, y: 10 };
+
+  function key(x, y) { return x + "," + y; }
+  function inBounds(x, y) { return x >= 0 && x < COLS && y >= 0 && y < ROWS; }
+  function isFree(x, y) { return inBounds(x, y) && !walls.has(key(x, y)); }
+
+  function loadSampleMaze() {
+    walls.clear();
+    // A column wall with a single gap near the bottom, forcing a detour --
+    // the same "wall + gap" shape used to catch the greedy-search bug
+    // during development of the real Python planner.
+    for (var y = 0; y < ROWS; y++) {
+      if (y !== ROWS - 3) walls.add(key(14, y));
+    }
+    for (var y2 = 3; y2 < ROWS - 4; y2++) {
+      if (y2 !== 6) walls.add(key(20, y2));
+    }
+  }
+  loadSampleMaze();
+
+  // ---- A*, mirroring planner.py's exact shape --------------------------
+  function manhattan(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+
+  function neighborsOf(c) {
+    var cand = [[c.x, c.y - 1], [c.x, c.y + 1], [c.x - 1, c.y], [c.x + 1, c.y]];
+    var out = [];
+    for (var i = 0; i < cand.length; i++) {
+      if (isFree(cand[i][0], cand[i][1])) out.push({ x: cand[i][0], y: cand[i][1] });
+    }
+    return out;
+  }
+
+  function cellLess(a, b) { return a.x !== b.x ? a.x - b.x : a.y - b.y; }
+
+  var search = null; // active search state, or null when idle/reset
+
+  function newSearch() {
+    var startKey = key(start.x, start.y), goalKey = key(goal.x, goal.y);
+    var visited = {};
+    visited[startKey] = { cell: start, g: 0, h: manhattan(start, goal), prev: null };
+    return {
+      frontier: [{ f: manhattan(start, goal), cell: start }],
+      visited: visited,
+      expanded: {},
+      current: null,
+      iteration: 0,
+      resorts: 0,
+      status: isFree(start.x, start.y) && isFree(goal.x, goal.y) ? "running" : "blocked-endpoint",
+      path: null,
+    };
+  }
+
+  function stepSearch(s) {
+    if (s.status !== "running") return s;
+    if (s.frontier.length === 0) { s.status = "unreachable"; return s; }
+
+    // The one line this whole tool exists to make visible: a full re-sort
+    // of the entire frontier every iteration (this project's planner.py
+    // calls heap.heap_sort() here), not an incremental push/pop heap.
+    s.frontier.sort(function (a, b) {
+      return a.f !== b.f ? a.f - b.f : cellLess(a.cell, b.cell);
+    });
+    s.resorts++;
+    var winner = s.frontier.shift();
+    var wKey = key(winner.cell.x, winner.cell.y);
+    var wData = s.visited[wKey];
+
+    // Staleness check: skip a frontier entry superseded by a cheaper route
+    // already recorded for this cell (the fix made earlier in this project).
+    if (winner.f !== wData.g + wData.h) return s;
+
+    s.iteration++;
+    s.current = winner.cell;
+    s.expanded[wKey] = true;
+
+    if (wKey === key(goal.x, goal.y)) {
+      var path = [];
+      var node = wData;
+      while (node) { path.unshift(node.cell); node = node.prev ? s.visited[key(node.prev.x, node.prev.y)] : null; }
+      s.path = path;
+      s.status = "found";
+      return s;
+    }
+
+    var neighbors = neighborsOf(winner.cell);
+    for (var i = 0; i < neighbors.length; i++) {
+      var n = neighbors[i], nKey = key(n.x, n.y);
+      var g2 = wData.g + 1;
+      var existing = s.visited[nKey];
+      if (!existing || g2 < existing.g) {
+        s.visited[nKey] = { cell: n, g: g2, h: manhattan(n, goal), prev: winner.cell };
+        s.frontier.push({ f: g2 + s.visited[nKey].h, cell: n });
+      }
+    }
+    return s;
+  }
+
+  // ---- Rendering --------------------------------------------------------
+  function draw() {
+    var c = {
+      panel2: token("--panel-2"), line: token("--line"), wall: token("--wall"),
+      frontier: token("--frontier"), visited: token("--visited"), path: token("--path"),
+      start: token("--start"), goal: token("--goal"), ink: token("--ink"),
+    };
+    ctx.fillStyle = c.panel2;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (search) {
+      var onFrontier = {};
+      for (var i = 0; i < search.frontier.length; i++) {
+        onFrontier[key(search.frontier[i].cell.x, search.frontier[i].cell.y)] = true;
+      }
+      Object.keys(search.expanded).forEach(function (k) {
+        var p = k.split(","); paintCell(+p[0], +p[1], c.visited);
+      });
+      Object.keys(onFrontier).forEach(function (k) {
+        var p = k.split(","); paintCell(+p[0], +p[1], c.frontier);
+      });
+    }
+
+    walls.forEach(function (k) {
+      var p = k.split(","); paintCell(+p[0], +p[1], c.wall);
+    });
+
+    if (search && search.path) {
+      search.path.forEach(function (cl) { paintCell(cl.x, cl.y, c.path); });
+    }
+    if (search && search.current) {
+      paintCell(search.current.x, search.current.y, c.ink, 0.85);
+    }
+
+    paintCell(start.x, start.y, c.start);
+    paintCell(goal.x, goal.y, c.goal);
+
+    ctx.strokeStyle = c.line;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (var x = 0; x <= COLS; x++) { ctx.moveTo(x * cell + 0.5, 0); ctx.lineTo(x * cell + 0.5, canvas.height); }
+    for (var y = 0; y <= ROWS; y++) { ctx.moveTo(0, y * cell + 0.5); ctx.lineTo(canvas.width, y * cell + 0.5); }
+    ctx.stroke();
+  }
+
+  function paintCell(x, y, color, alpha) {
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.fillStyle = color;
+    ctx.fillRect(x * cell, y * cell, cell, cell);
+    ctx.globalAlpha = 1;
+  }
+
+  // ---- Telemetry ----------------------------------------------------
+  function fmtCell(c) { return c ? "(" + c.x + ", " + c.y + ")" : "—"; }
+
+  function updateTelemetry() {
+    var statusEl = document.getElementById("tStatus");
+    var label = "idle", cls = "status-running";
+    if (search) {
+      if (search.status === "running") { label = "searching"; cls = "status-running"; }
+      else if (search.status === "found") { label = "path found"; cls = "status-found"; }
+      else if (search.status === "unreachable") { label = "unreachable"; cls = "status-none"; }
+      else if (search.status === "blocked-endpoint") { label = "start/goal blocked"; cls = "status-none"; }
+    }
+    statusEl.textContent = label;
+    statusEl.className = cls;
+
+    document.getElementById("tIter").textContent = search ? search.iteration : 0;
+    document.getElementById("tFrontier").textContent = search ? search.frontier.length : 0;
+    document.getElementById("tExpanded").textContent = search ? Object.keys(search.expanded).length : 0;
+    document.getElementById("tResorts").textContent = search ? search.resorts : 0;
+    document.getElementById("tCurrent").textContent = search ? fmtCell(search.current) : "—";
+
+    var ghf = "—";
+    if (search && search.current) {
+      var d = search.visited[key(search.current.x, search.current.y)];
+      if (d) ghf = d.g + " / " + d.h + " / " + (d.g + d.h);
+    }
+    document.getElementById("tGhf").textContent = ghf;
+    document.getElementById("tPath").textContent = search && search.path ? search.path.length + " cells" : "—";
+  }
+
+  function updateMapInfo() {
+    var el = document.getElementById("mapInfo");
+    el.innerHTML =
+      "{\n" +
+      '  <span class="key">"resolution"</span>: <span class="val">1.0</span>,\n' +
+      '  <span class="key">"width"</span>: <span class="val">' + COLS + '</span>,\n' +
+      '  <span class="key">"height"</span>: <span class="val">' + ROWS + '</span>,\n' +
+      '  <span class="key">"origin"</span>: { <span class="val">"x": 0.0, "y": 0.0</span> }\n' +
+      "}";
+  }
+  updateMapInfo();
+
+  // ---- Interaction ------------------------------------------------------
+  var tool = "wall";
+  var toolButtons = {
+    wall: document.getElementById("toolWall"),
+    erase: document.getElementById("toolErase"),
+    start: document.getElementById("toolStart"),
+    goal: document.getElementById("toolGoal"),
+  };
+  function setTool(t) {
+    tool = t;
+    Object.keys(toolButtons).forEach(function (k) { toolButtons[k].setAttribute("aria-pressed", k === t ? "true" : "false"); });
+  }
+  Object.keys(toolButtons).forEach(function (k) { toolButtons[k].addEventListener("click", function () { setTool(k); }); });
+
+  function eventToCell(evt) {
+    var rect = canvas.getBoundingClientRect();
+    var scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+    var px = ((evt.touches ? evt.touches[0].clientX : evt.clientX) - rect.left) * scaleX;
+    var py = ((evt.touches ? evt.touches[0].clientY : evt.clientY) - rect.top) * scaleY;
+    return { x: Math.floor(px / cell), y: Math.floor(py / cell) };
+  }
+
+  function applyTool(c) {
+    if (!inBounds(c.x, c.y)) return;
+    if (c.x === start.x && c.y === start.y && tool !== "start") return;
+    if (c.x === goal.x && c.y === goal.y && tool !== "goal") return;
+    if (tool === "wall") walls.add(key(c.x, c.y));
+    else if (tool === "erase") walls.delete(key(c.x, c.y));
+    else if (tool === "start") { start = { x: c.x, y: c.y }; walls.delete(key(c.x, c.y)); }
+    else if (tool === "goal") { goal = { x: c.x, y: c.y }; walls.delete(key(c.x, c.y)); }
+    stopRun();
+    search = null;
+    draw();
+    updateTelemetry();
+  }
+
+  var painting = false;
+  canvas.addEventListener("mousedown", function (e) { painting = true; applyTool(eventToCell(e)); });
+  canvas.addEventListener("mousemove", function (e) { if (painting) applyTool(eventToCell(e)); });
+  window.addEventListener("mouseup", function () { painting = false; });
+  canvas.addEventListener("touchstart", function (e) { e.preventDefault(); painting = true; applyTool(eventToCell(e)); });
+  canvas.addEventListener("touchmove", function (e) { e.preventDefault(); if (painting) applyTool(eventToCell(e)); });
+  canvas.addEventListener("touchend", function () { painting = false; });
+
+  document.getElementById("btnClear").addEventListener("click", function () {
+    walls.clear(); stopRun(); search = null; draw(); updateTelemetry();
+  });
+  document.getElementById("btnMaze").addEventListener("click", function () {
+    walls.clear();
+    for (var i = 0; i < 220; i++) {
+      var x = Math.floor(Math.random() * COLS), y = Math.floor(Math.random() * ROWS);
+      if ((x !== start.x || y !== start.y) && (x !== goal.x || y !== goal.y)) walls.add(key(x, y));
+    }
+    stopRun(); search = null; draw(); updateTelemetry();
+  });
+
+  // ---- Transport ------------------------------------------------------
+  var timer = null;
+  function speedMs() {
+    var v = +document.getElementById("speed").value; // 1..200
+    return Math.max(4, 220 - v);
+  }
+  function tick() {
+    if (!search) search = newSearch();
+    stepSearch(search);
+    draw(); updateTelemetry();
+    if (search.status !== "running") stopRun();
+  }
+  function startRun() {
+    if (!search) search = newSearch();
+    if (search.status !== "running") return;
+    stopRun();
+    timer = setInterval(tick, speedMs());
+    document.getElementById("btnRun").textContent = "❚❚ Pause";
+  }
+  function stopRun() {
+    if (timer) { clearInterval(timer); timer = null; }
+    document.getElementById("btnRun").textContent = "▶ Run";
+  }
+  document.getElementById("btnRun").addEventListener("click", function () {
+    if (timer) stopRun(); else startRun();
+  });
+  document.getElementById("btnStep").addEventListener("click", function () { stopRun(); tick(); });
+  document.getElementById("btnReset").addEventListener("click", function () { stopRun(); search = null; draw(); updateTelemetry(); });
+  document.getElementById("speed").addEventListener("input", function () { if (timer) { stopRun(); startRun(); } });
+
+  // ---- Theme note + redraw on scheme change ------------------------------
+  var mq = window.matchMedia("(prefers-color-scheme: dark)");
+  function noteTheme() {
+    document.getElementById("themeNote").textContent = mq.matches ? "phosphor / dark" : "drafting / light";
+  }
+  noteTheme();
+  mq.addEventListener("change", function () { noteTheme(); draw(); });
+
+  draw();
+  updateTelemetry();
+})();
+</script>
