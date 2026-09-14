@@ -143,15 +143,19 @@ class TestTopicsAndServices(GatewayTestCase):
         publisher = self.make_client()
 
         a.send({"op": "subscribe", "topic": "/x", "type": "std_msgs/String", "id": "sub-a"})
-        self.assertEqual(a.read_message()["op"], "status")
+        self.assertEqual(a.read_message()["op"], "status", "subscribe must be acknowledged with a status message")
         b.send({"op": "subscribe", "topic": "/y", "type": "std_msgs/String", "id": "sub-b"})
         self.assertEqual(b.read_message()["op"], "status")
 
+        publisher.send({"op": "advertise", "topic": "/x", "type": "std_msgs/String"})
         publisher.send({"op": "publish", "topic": "/x", "msg": {"data": "hello"}})
 
         delivered = a.read_message()
-        self.assertEqual(delivered, {"op": "publish", "topic": "/x", "msg": {"data": "hello"}})
-        b.expect_no_message()
+        self.assertEqual(
+            delivered, {"op": "publish", "topic": "/x", "msg": {"data": "hello"}},
+            "subscriber to /x must receive exactly the message published on /x",
+        )
+        b.expect_no_message()  # subscriber to /y must never see a /x publish
 
     def test_duplicate_subscribe_delivers_exactly_once(self) -> None:
         client = self.make_client()
@@ -161,12 +165,13 @@ class TestTopicsAndServices(GatewayTestCase):
         # Both subscribe requests get an informational status...
         client.read_message()
         client.read_message()
+        publisher.send({"op": "advertise", "topic": "/dup", "type": "std_msgs/String"})
         publisher.send({"op": "publish", "topic": "/dup", "msg": {"data": "once"}})
         # ...but the underlying registration is a *set*, so exactly one
         # publish message should follow, not two.
         first = client.read_message()
         self.assertEqual(first["msg"], {"data": "once"})
-        client.expect_no_message()
+        client.expect_no_message()  # a second identical delivery would mean subscribers isn't deduplicated
 
     def test_disconnect_cleans_up_and_others_keep_working(self) -> None:
         doomed = RawClient()
@@ -182,8 +187,52 @@ class TestTopicsAndServices(GatewayTestCase):
         survivor.send({"op": "subscribe", "topic": "/z", "type": "std_msgs/String"})
         self.assertEqual(survivor.read_message()["op"], "status")
         publisher = self.make_client()
+        publisher.send({"op": "advertise", "topic": "/z", "type": "std_msgs/String"})
         publisher.send({"op": "publish", "topic": "/z", "msg": {"data": "still alive"}})
-        self.assertEqual(survivor.read_message()["msg"], {"data": "still alive"})
+        self.assertEqual(
+            survivor.read_message()["msg"], {"data": "still alive"},
+            "an unrelated subscriber must still receive publishes after a different connection disconnects",
+        )
+
+    def test_publish_without_advertise_is_not_delivered(self) -> None:
+        # Baseline for the unadvertise scenario below: a connection that
+        # never advertised at all must not be able to publish either.
+        subscriber = self.make_client()
+        subscriber.send({"op": "subscribe", "topic": "/never-advertised", "type": "std_msgs/String"})
+        self.assertEqual(subscriber.read_message()["op"], "status")
+
+        publisher = self.make_client()
+        publisher.send({"op": "publish", "topic": "/never-advertised", "msg": {"data": "unauthorized"}})
+        subscriber.expect_no_message()
+
+    def test_publish_after_unadvertise_is_not_delivered(self) -> None:
+        # The exact scenario: advertise, publish (works), unadvertise,
+        # publish again on the same connection -- that second publish
+        # must not reach a still-subscribed client. Withdrawing publisher
+        # registration must actually stop future publishes, not just
+        # update bookkeeping nothing else looks at.
+        publisher = self.make_client()
+        publisher.send({"op": "advertise", "topic": "/withdraw-me", "type": "std_msgs/String"})
+
+        subscriber = self.make_client()
+        subscriber.send({"op": "subscribe", "topic": "/withdraw-me", "type": "std_msgs/String"})
+        self.assertEqual(subscriber.read_message()["op"], "status")
+
+        publisher.send({"op": "publish", "topic": "/withdraw-me", "msg": {"data": "before"}})
+        self.assertEqual(subscriber.read_message()["msg"], {"data": "before"})
+
+        publisher.send({"op": "unadvertise", "topic": "/withdraw-me"})
+        publisher.send({"op": "publish", "topic": "/withdraw-me", "msg": {"data": "stale"}})
+        subscriber.expect_no_message()
+
+        # Re-advertising must restore the ability to publish -- this
+        # isn't a one-way trip.
+        publisher.send({"op": "advertise", "topic": "/withdraw-me", "type": "std_msgs/String"})
+        publisher.send({"op": "publish", "topic": "/withdraw-me", "msg": {"data": "after"}})
+        self.assertEqual(
+            subscriber.read_message()["msg"], {"data": "after"},
+            "re-advertising after an unadvertise must restore the ability to publish",
+        )
 
     def test_service_round_trip_preserves_caller_id(self) -> None:
         provider = self.make_client()
@@ -195,11 +244,14 @@ class TestTopicsAndServices(GatewayTestCase):
 
         forwarded = provider.read_message()
         self.assertEqual(forwarded["op"], "call_service")
-        self.assertEqual(forwarded["args"], {"n": 42})
+        self.assertEqual(forwarded["args"], {"n": 42}, "the provider must receive the caller's original args unchanged")
         # The provider-side id must NOT be the caller's original id — see
         # broker.py's PendingCall docstring for why that distinction
         # matters (two different callers could reuse "call-17").
-        self.assertNotEqual(forwarded["id"], "call-17")
+        self.assertNotEqual(
+            forwarded["id"], "call-17",
+            "the forwarded call must use a broker-minted provider-side id, not the caller's raw id",
+        )
 
         provider.send(
             {
@@ -213,7 +265,9 @@ class TestTopicsAndServices(GatewayTestCase):
         )
         response = caller.read_message()
         self.assertEqual(response["op"], "service_response")
-        self.assertEqual(response["id"], "call-17")  # caller's own id, echoed back
+        self.assertEqual(
+            response["id"], "call-17", "the response back to the caller must use the caller's own original id"
+        )
         self.assertTrue(response["result"])
         self.assertEqual(response["values"], {"echo": {"n": 42}})
 
@@ -249,7 +303,10 @@ class TestTopicsAndServices(GatewayTestCase):
         response_b = caller_b.read_message()
         self.assertEqual(response_a["id"], "dup")
         self.assertEqual(response_b["id"], "dup")
-        self.assertEqual(response_a["values"], {"answered": "a"})
+        self.assertEqual(
+            response_a["values"], {"answered": "a"},
+            "caller_a's response must be its own answer, not caller_b's, despite the shared id 'dup'",
+        )
         self.assertEqual(response_b["values"], {"answered": "b"})
 
     def test_call_with_no_provider_fails_promptly(self) -> None:
@@ -258,12 +315,16 @@ class TestTopicsAndServices(GatewayTestCase):
         caller.send({"op": "call_service", "service": "/nobody_home", "id": "call-x", "args": {}})
         response = caller.read_message(timeout=2.0)
         elapsed = time.monotonic() - started
-        self.assertFalse(response["result"])
+        self.assertFalse(response["result"], "calling a service with no provider must fail")
         self.assertEqual(response["id"], "call-x")
         # A missing provider is known synchronously in broker.py (no timer
         # is started), so this must return almost immediately, not after
         # waiting out the multi-second service-call timeout.
-        self.assertLess(elapsed, 1.0)
+        self.assertLess(
+            elapsed, 1.0,
+            f"a missing-provider failure must be synchronous (< 1s), took {elapsed:.2f}s -- "
+            f"looks like it fell through to the timeout path instead",
+        )
 
     def test_provider_disconnect_mid_call_fails_the_caller(self) -> None:
         provider = self.make_client()
@@ -276,19 +337,85 @@ class TestTopicsAndServices(GatewayTestCase):
         provider.close()
 
         response = caller.read_message(timeout=2.0)
-        self.assertFalse(response["result"])
+        self.assertFalse(response["result"], "a caller must get result:false when its provider vanishes mid-call")
         self.assertEqual(response["id"], "call-y")
+
+    def test_unadvertise_service_removes_provider(self) -> None:
+        provider = self.make_client()
+        provider.send({"op": "advertise_service", "service": "/temp", "type": "test/Temp"})
+        provider.read_message()
+        provider.send({"op": "unadvertise_service", "service": "/temp"})
+        time.sleep(0.2)
+
+        caller = self.make_client()
+        caller.send({"op": "call_service", "service": "/temp", "id": "after-withdraw", "args": {}})
+        response = caller.read_message(timeout=2.0)
+        self.assertFalse(
+            response["result"],
+            "calling a service after its only provider unadvertised must fail (no provider), not hang or succeed",
+        )
+
+    def test_unadvertise_service_only_removes_if_sender_is_current_owner(self) -> None:
+        # Spec: "unadvertise_service removes a service only when the
+        # sender is its current provider." A connection that never owned
+        # the service must not be able to evict the real provider.
+        real_provider = self.make_client()
+        real_provider.send({"op": "advertise_service", "service": "/owned", "type": "test/Owned"})
+        real_provider.read_message()
+
+        impostor = self.make_client()
+        impostor.send({"op": "unadvertise_service", "service": "/owned"})  # never advertised /owned itself
+        time.sleep(0.2)
+
+        caller = self.make_client()
+        caller.send({"op": "call_service", "service": "/owned", "id": "still-owned", "args": {}})
+        forwarded = real_provider.read_message(timeout=2.0)
+        self.assertEqual(
+            forwarded["service"], "/owned",
+            "the real provider must still receive forwarded calls -- an unrelated connection's "
+            "unadvertise_service must not have evicted it",
+        )
+        real_provider.send({
+            "op": "service_response", "service": "/owned", "id": forwarded["id"],
+            "values": {}, "result": True, "status": "",
+        })
+        response = caller.read_message(timeout=2.0)
+        self.assertTrue(response["result"], "the call must still succeed through the still-registered real provider")
+
+    def test_advertise_service_conflict_first_registrant_wins(self) -> None:
+        first = self.make_client()
+        first.send({"op": "advertise_service", "service": "/contested", "type": "test/Contested", "id": "first-adv"})
+        first_ack = first.read_message()
+        self.assertEqual(first_ack["level"], "info", "the first registrant's advertise_service must succeed")
+
+        second = self.make_client()
+        second.send({"op": "advertise_service", "service": "/contested", "type": "test/Contested", "id": "second-adv"})
+        second_ack = second.read_message()
+        self.assertEqual(
+            second_ack["level"], "error",
+            "a second advertise_service for an already-owned service must be rejected with an error status",
+        )
+
+        # Calls must still route to the first (winning) registrant, never the second.
+        caller = self.make_client()
+        caller.send({"op": "call_service", "service": "/contested", "id": "route-check", "args": {}})
+        forwarded = first.read_message(timeout=2.0)
+        self.assertEqual(forwarded["service"], "/contested")
+        second.expect_no_message(timeout=0.3)  # the loser must never receive a forwarded call
 
     def test_malformed_line_does_not_crash_connection_or_gateway(self) -> None:
         client = self.make_client()
         client.send_raw(b"not json at all\n")
         error = client.read_message()
         self.assertEqual(error["op"], "status")
-        self.assertEqual(error["level"], "error")
+        self.assertEqual(error["level"], "error", "malformed input must produce an error status, not be silently dropped")
 
         # The same connection must still work afterward...
         client.send({"op": "subscribe", "topic": "/after-garbage", "type": "std_msgs/String"})
-        self.assertEqual(client.read_message()["op"], "status")
+        self.assertEqual(
+            client.read_message()["op"], "status",
+            "the same connection must still work after sending malformed input",
+        )
 
         # ...and an unrelated client must never have noticed anything.
         other = self.make_client()
@@ -306,7 +433,10 @@ class TestTopicsAndServices(GatewayTestCase):
         client.send_raw(two_lines.encode("utf-8"))
         first = client.read_message()
         second = client.read_message()
-        self.assertEqual({first["id"], second["id"]}, {"1", "2"})
+        self.assertEqual(
+            {first["id"], second["id"]}, {"1", "2"},
+            "both messages sent in a single TCP write must be parsed and processed, not just the first",
+        )
 
     def test_message_split_across_two_sends_is_still_parsed(self) -> None:
         client = self.make_client()
@@ -316,7 +446,9 @@ class TestTopicsAndServices(GatewayTestCase):
         time.sleep(0.1)  # force these onto two separate recv() calls, not one
         client.send_raw(whole[midpoint:].encode("utf-8"))
         message = client.read_message()
-        self.assertEqual(message["id"], "s1")
+        self.assertEqual(
+            message["id"], "s1", "a message split across two TCP writes must still be reassembled and parsed"
+        )
 
     def test_slow_subscriber_does_not_block_other_clients(self) -> None:
         # A subscriber that stops calling recv() will eventually back up
@@ -327,6 +459,7 @@ class TestTopicsAndServices(GatewayTestCase):
         slow.read_message()  # consume the subscribe status, then stop reading
 
         publisher = self.make_client()
+        publisher.send({"op": "advertise", "topic": "/firehose", "type": "std_msgs/String"})
         big_payload = {"data": "x" * 4096}
         for _ in range(500):  # enough to fill a typical kernel socket buffer
             publisher.send({"op": "publish", "topic": "/firehose", "msg": big_payload})
@@ -338,8 +471,12 @@ class TestTopicsAndServices(GatewayTestCase):
         other.send({"op": "subscribe", "topic": "/unrelated", "type": "std_msgs/String"})
         self.assertEqual(other.read_message(timeout=2.0)["op"], "status")
         other_publisher = self.make_client()
+        other_publisher.send({"op": "advertise", "topic": "/unrelated", "type": "std_msgs/String"})
         other_publisher.send({"op": "publish", "topic": "/unrelated", "msg": {"data": "prompt"}})
-        self.assertEqual(other.read_message(timeout=2.0)["msg"], {"data": "prompt"})
+        self.assertEqual(
+            other.read_message(timeout=2.0)["msg"], {"data": "prompt"},
+            "an unrelated client must get prompt delivery even while a slow subscriber's buffer is backed up",
+        )
 
 
 class TestHeapServicesOverTheWire(GatewayTestCase):
@@ -361,14 +498,17 @@ class TestHeapServicesOverTheWire(GatewayTestCase):
     def test_heapify_example_from_spec(self) -> None:
         client = self.make_client()
         response = self._call(client, "/heapify", {"values": [3.0, 1.0, 2.0]}, "h1")
-        self.assertTrue(response["result"])
+        self.assertTrue(response["result"], f"expected /heapify to succeed, got: {response}")
         result_heap = response["values"]["heap"]
-        self.assertEqual(sorted(result_heap), [1.0, 2.0, 3.0])
+        self.assertEqual(sorted(result_heap), [1.0, 2.0, 3.0], "the returned heap must contain the same multiset")
         n = len(result_heap)
         for i in range(n):
             for child in (2 * i + 1, 2 * i + 2):
                 if child < n:
-                    self.assertLessEqual(result_heap[i], result_heap[child])
+                    self.assertLessEqual(
+                        result_heap[i], result_heap[child],
+                        f"heap property violated at index {i} via the /heapify service",
+                    )
 
     def test_heap_sort_example_from_spec(self) -> None:
         client = self.make_client()
@@ -380,19 +520,20 @@ class TestHeapServicesOverTheWire(GatewayTestCase):
         client = self.make_client()
         cases = [[], [-1.0, -1.0, 0.0, 5.5, -2.25]]
         for i, numbers in enumerate(cases):
-            response = self._call(client, "/heap_sort", {"numbers": numbers}, f"s-case-{i}")
-            self.assertTrue(response["result"])
-            self.assertEqual(response["values"]["sorted"], sorted(numbers))
+            with self.subTest(numbers=numbers):
+                response = self._call(client, "/heap_sort", {"numbers": numbers}, f"s-case-{i}")
+                self.assertTrue(response["result"], f"expected success for input {numbers}, got: {response}")
+                self.assertEqual(response["values"]["sorted"], sorted(numbers))
 
     def test_malformed_args_fail_cleanly_without_killing_the_service(self) -> None:
         client = self.make_client()
         bad = self._call(client, "/heap_sort", {"numbers": "not-a-list"}, "bad-1")
-        self.assertFalse(bad["result"])
+        self.assertFalse(bad["result"], "non-list 'numbers' must fail cleanly, not crash the service")
 
         # The service must still work for the next caller — a bad request
         # must not have wedged the in-process provider's worker thread.
         good = self._call(client, "/heap_sort", {"numbers": [2.0, 1.0]}, "good-1")
-        self.assertTrue(good["result"])
+        self.assertTrue(good["result"], "a malformed prior request must not prevent a later valid one from working")
         self.assertEqual(good["values"]["sorted"], [1.0, 2.0])
 
 

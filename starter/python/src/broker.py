@@ -57,7 +57,7 @@ import itertools
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 from protocol import publish_envelope, service_response, status
 
@@ -103,10 +103,12 @@ class TopicState:
     """
 
     subscribers: set[MessageSink] = field(default_factory=set)
-    # `publishers` is bookkeeping only: nothing in the protocol requires a
-    # connection to `advertise` before it `publish`es, so this set is never
-    # consulted to decide whether a publish is allowed. It exists purely so
-    # `unadvertise` has something well-defined to remove from.
+    # `publishers` gates external publishes: `Broker.publish()` only
+    # delivers a publish from an external connection (one that passes its
+    # own `sink`) if that sink is currently a member of this set. A
+    # connection joins it via `advertise` and leaves it via `unadvertise`
+    # or disconnect (see `cleanup_connection`) — so unadvertising and then
+    # immediately publishing again correctly reaches no one.
     publishers: set[MessageSink] = field(default_factory=set)
 
 
@@ -179,9 +181,24 @@ class Broker:
             if state is not None:
                 state.subscribers.discard(sink)
 
-    def publish(self, topic: str, msg: Any) -> None:
+    def publish(self, topic: str, msg: Any, sink: Optional[MessageSink] = None) -> None:
+        """Deliver `msg` to every current subscriber of `topic`.
+
+        `sink` identifies who's publishing, when known. External clients
+        always pass it (see connection.py's `_handle_publish`): a
+        publish is only delivered if `sink` is *currently* advertised as
+        a publisher of this exact topic — calling `unadvertise` (or
+        disconnecting) and then publishing again must not still reach
+        subscribers. `sink` is optional, not required, because internal
+        runtime components (e.g. planner.py publishing `/path` after a
+        successful plan) aren't connections and have no advertise
+        registration to check; passing nothing preserves the old
+        unconditional behavior for exactly that kind of trusted caller.
+        """
         with self._lock:
             state = self._topics.get(topic)
+            if sink is not None and (state is None or sink not in state.publishers):
+                return
             # Copy the subscriber set while we hold the lock, so we can
             # iterate and call .send() on each one *after* releasing it.
             # Iterating the live set without a lock held would itself be a

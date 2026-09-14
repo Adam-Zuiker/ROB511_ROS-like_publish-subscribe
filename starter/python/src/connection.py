@@ -196,7 +196,11 @@ class Connection:
         self._broker.unadvertise(self, message["topic"])
 
     def _handle_publish(self, message: Dict[str, Any]) -> None:
-        self._broker.publish(message["topic"], message["msg"])
+        # Passing `self` is what makes the broker enforce "must be
+        # currently advertised to publish" for external clients — see
+        # Broker.publish()'s docstring for why internal callers (like
+        # planner.py publishing /path) omit it instead.
+        self._broker.publish(message["topic"], message["msg"], self)
 
     def _handle_subscribe(self, message: Dict[str, Any]) -> None:
         self._broker.subscribe(self, message["topic"], message.get("id"))

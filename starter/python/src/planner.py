@@ -125,10 +125,15 @@ def a_star(
     while len(frontier):
         sorted_frontier = heap.heap_sort(frontier)
         winner = sorted_frontier[0]
+        frontier.remove(winner)
+
         winner_visited_cell = visited[winner[1]]
+        current_priority = winner_visited_cell.manhattan_distance + winner_visited_cell.g_score
+        if winner[0] != current_priority:
+            continue   
+
         if winner_visited_cell.cell == goal:
             return calculate_path(winner_visited_cell)
-        frontier.remove(winner)
         visited_neighbors = [
             VisitedCell(neighbor, manhattan_distance(neighbor, goal), winner_visited_cell, winner_visited_cell.g_score + 1)
             for neighbor in neighbors(winner_visited_cell.cell, info, data)
@@ -185,6 +190,8 @@ def _pose_xy(value: Any, label: str) -> Tuple[float, float]:
         value_ = position.get(axis)
         if isinstance(value_, bool) or not isinstance(value_, (int, float)):
             raise ValueError(f"{label}.pose.position.{axis} must be numeric")
+        if not math.isfinite(value_):
+            raise ValueError(f"{label}.pose.position.{axis} must be finite")
         coords.append(float(value_))
     return coords[0], coords[1]
 
