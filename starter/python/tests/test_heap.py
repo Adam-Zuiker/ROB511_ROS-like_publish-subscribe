@@ -1,216 +1,133 @@
-"""
-tests/test_heap.py — Unit tests for the hand-rolled binary min-heap in
-src/heap.py, run entirely in-process (no sockets, no gateway).
-
-Run with:  python3 -m unittest discover -s tests   (from starter/python/)
-
-Every assertion below carries a message describing the *invariant*, not
-just the values being compared — the goal is that a failure's message
-alone should point at which property broke, without needing to re-derive
-it from a bare diff. This matters most for a mutation-testing exercise:
-when someone else's edit silently breaks a `<` into a `<=` somewhere,
-"index 6.5 != 5" (or a 100-element list diff) tells you nothing about
-*where* to look, but "heap property violated at index 3 (right child)"
-does.
-"""
-
-from __future__ import annotations
+"""Direct tests of src/heap.py and src/services/heap_service.py. No runtime needed."""
 
 import random
-import sys
-import unittest
-from collections import Counter
-from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+from planning_support import is_min_heap
 
-import heap  # noqa: E402 - import after sys.path setup, see above
+import heap
+from services import heap_service
 
 
-def assert_is_min_heap(testcase: unittest.TestCase, values: list, size: int | None = None) -> None:
-    """Check the defining property of a binary min-heap directly against
-    its array layout: every node is <= both of its (present) children.
-
-    `size` restricts the check to `values[:size]` — for confirming
-    sift_down honored a shrunken "live" region and left the tail alone.
-    """
-    n = len(values) if size is None else size
-    for i in range(n):
-        left, right = 2 * i + 1, 2 * i + 2
-        if left < n:
-            testcase.assertLessEqual(
-                values[i], values[left], f"heap property violated at index {i} (left child)"
-            )
-        if right < n:
-            testcase.assertLessEqual(
-                values[i], values[right], f"heap property violated at index {i} (right child)"
-            )
+def random_lists(seed, count=200, max_len=40):
+    rng = random.Random(seed)
+    cases = [[], [7], [2, 2, 2, 2], list(range(10)), list(range(10, 0, -1)), [0.5, -0.5, 0, -3, 3.25]]
+    for _ in range(count):
+        length = rng.randint(0, max_len)
+        if rng.random() < 0.5:
+            cases.append([rng.randint(-20, 20) for _ in range(length)])
+        else:
+            cases.append([round(rng.uniform(-100, 100), 2) for _ in range(length)])
+    return cases
 
 
-def assert_first_mismatch(testcase: unittest.TestCase, actual: list, expected: list, label: str) -> None:
-    """Like assertEqual, but on failure names the *first differing index*
-    instead of dumping two whole lists — much faster to act on when the
-    lists are long (e.g. a 100-element randomized push/pop sequence)."""
-    testcase.assertEqual(len(actual), len(expected), f"{label}: length {len(actual)} != {len(expected)}")
-    for i, (a, e) in enumerate(zip(actual, expected)):
-        if a != e:
-            testcase.fail(f"{label}: first mismatch at index {i}: got {a!r}, expected {e!r}")
+def test_sift_up_bubbles_new_minimum_to_root_and_stops_early():
+    values = [1, 3, 5, 7, 9, 6, 0]
+    heap.sift_up(values, 6)
+    assert values == [0, 3, 1, 7, 9, 6, 5], f"sift_up of 0 from a leaf should reach the root: {values}"
+
+    values = [1, 3, 5, 7, 9, 6, 4]
+    heap.sift_up(values, 6)
+    assert values == [1, 3, 4, 7, 9, 6, 5], f"sift_up should stop once the parent is smaller: {values}"
+
+    values = [4, 8, 9]
+    heap.sift_up(values, 0)
+    assert values == [4, 8, 9], f"sift_up on the root must not change anything: {values}"
 
 
-# A range of input shapes the spec explicitly calls out: empty, duplicates,
-# negative values, fractional values, and one larger randomized case.
-CASES = [
-    [],
-    [1.0],
-    [3.0, 1.0, 2.0],
-    [5.0, 5.0, 5.0],
-    [2.0, 2.0, 1.0, 1.0, 3.0],
-    [-4.0, 0.0, -1.5, 3.25, -3.25],
-    [random.uniform(-100, 100) for _ in range(200)],
-]
+def test_sift_down_swaps_with_smaller_child_and_honors_size():
+    values = [9, 2, 1, 5, 6, 3, 4]
+    heap.sift_down(values, 0)
+    assert values == [1, 2, 3, 5, 6, 9, 4], f"sift_down should follow the smaller child each level: {values}"
+
+    values = [9, 1, 2, 0, 0]
+    heap.sift_down(values, 0, 3)
+    assert values == [1, 9, 2, 0, 0], f"sift_down(size=3) must not touch indices >= 3: {values}"
+
+    values = [5, 3, 1]
+    heap.sift_down(values, 0, 2)
+    assert values == [3, 5, 1], f"sift_down(size=2) must ignore the right child at index 2: {values}"
+
+    values = [1, 5, 3]
+    heap.sift_down(values, 0)
+    assert values == [1, 5, 3], f"sift_down must not move a root smaller than its children: {values}"
 
 
-class TestArithmeticPrimitives(unittest.TestCase):
-    """Direct checks on _parent/_left/_right's raw formulas, independent
-    of any heap behavior. If one of these is mutated, these tests point
-    straight at the broken formula instead of failing indirectly via a
-    corrupted heap somewhere else."""
-
-    def test_parent_of_root_has_no_valid_parent(self) -> None:
-        # (0-1)//2 == -1, a value that must never be treated as a real
-        # index (see sift_up's root guard) -- checked here so a change to
-        # the formula itself, not just the guard, gets caught directly.
-        self.assertEqual(heap._parent(0), -1, "_parent(0) must be -1 (no real parent exists)")
-
-    def test_parent_left_right_are_consistent_inverses(self) -> None:
-        for i in range(1, 50):
-            with self.subTest(index=i):
-                self.assertEqual(
-                    heap._parent(heap._left(i)), i, f"_parent(_left({i})) must round-trip back to {i}"
-                )
-                self.assertEqual(
-                    heap._parent(heap._right(i)), i, f"_parent(_right({i})) must round-trip back to {i}"
-                )
-
-    def test_left_and_right_are_adjacent_and_ordered(self) -> None:
-        for i in range(20):
-            with self.subTest(index=i):
-                self.assertEqual(
-                    heap._right(i), heap._left(i) + 1, f"_right({i}) must be exactly _left({i}) + 1"
-                )
+def test_heapify_builds_valid_heap_and_preserves_values():
+    for items in random_lists(seed=1):
+        original = list(items)
+        result = heap.heapify(items)
+        assert items == original, f"heapify mutated its input: {original} -> {items}"
+        assert result is not items, "heapify must return a new list"
+        assert is_min_heap(result), f"heapify({original}) is not a min-heap: {result}"
+        assert sorted(result) == sorted(original), f"heapify({original}) changed the values: {result}"
 
 
-class TestSiftPrimitives(unittest.TestCase):
-    def test_sift_up_moves_new_minimum_to_root(self) -> None:
-        values = [2.0, 5.0, 3.0, -1.0]
-        heap.sift_up(values, 3)
-        assert_is_min_heap(self, values)
-        self.assertEqual(values[0], -1.0, "sift_up must walk a new global minimum all the way to the root")
-
-    def test_sift_up_stops_as_soon_as_parent_is_not_smaller(self) -> None:
-        # The element at index 3 (4.0) is already >= its parent (2.0), so
-        # sift_up must leave the array completely untouched -- a mutation
-        # that sifts unconditionally (or off by one) would move something.
-        values = [1.0, 2.0, 3.0, 4.0]
-        snapshot = list(values)
-        heap.sift_up(values, 3)
-        self.assertEqual(values, snapshot, "sift_up must not move an element that's already >= its parent")
-
-    def test_sift_down_restores_property_after_root_replaced(self) -> None:
-        values = [1.0, 2.0, 3.0, 4.0, 5.0]
-        values[0] = 9.0
-        heap.sift_down(values, 0)
-        assert_is_min_heap(self, values)
-        self.assertEqual(
-            Counter(values),
-            Counter([9.0, 2.0, 3.0, 4.0, 5.0]),
-            "sift_down must only reorder elements, never drop or duplicate one",
-        )
-
-    def test_sift_down_honors_a_shrunken_size(self) -> None:
-        # heap[:3] is a valid mini-heap on its own; heap[3:] is deliberately
-        # left invalid. Restricting sift_down to size=3 must fix only the
-        # live region and leave the tail completely untouched -- this is
-        # the one code path no other test in this file exercises.
-        values = [9.0, 2.0, 3.0, -100.0, -200.0]
-        heap.sift_down(values, 0, size=3)
-        assert_is_min_heap(self, values, size=3)
-        self.assertEqual(
-            values[3:], [-100.0, -200.0], "sift_down must not touch anything at or beyond index `size`"
-        )
-
-
-class TestHeapify(unittest.TestCase):
-    def test_heap_property_holds_for_all_cases(self) -> None:
-        for case in CASES:
-            with self.subTest(case=case[:5]):
-                result = heap.heapify(case)
-                assert_is_min_heap(self, result)
-
-    def test_multiset_preserved(self) -> None:
-        for case in CASES:
-            with self.subTest(case=case[:5]):
-                result = heap.heapify(case)
-                self.assertEqual(
-                    Counter(result), Counter(case), "heapify must preserve the exact input multiset"
-                )
-
-    def test_root_is_minimum(self) -> None:
-        for case in CASES:
-            if not case:
-                continue
-            with self.subTest(case=case[:5]):
-                result = heap.heapify(case)
-                self.assertEqual(result[0], min(case), "heapify's root (index 0) must be the global minimum")
-
-
-class TestHeapPushPop(unittest.TestCase):
-    def test_push_then_pop_all_yields_ascending_order(self) -> None:
-        values = [random.uniform(-50, 50) for _ in range(100)]
-        built: list = []
-        for v in values:
-            heap.heap_push(built, v)
-            assert_is_min_heap(self, built)
+def test_heap_push_then_pop_returns_ascending_order():
+    for items in random_lists(seed=2, count=100):
+        h = []
+        for item in items:
+            heap.heap_push(h, item)
+            assert is_min_heap(h), f"heap invariant broken after pushing {item}: {h}"
+        assert len(h) == len(items), f"heap_push lost or duplicated items: {h} vs {items}"
         popped = []
-        while built:
-            popped.append(heap.heap_pop(built))
-            assert_is_min_heap(self, built)
-        assert_first_mismatch(self, popped, sorted(values), "heap_push/heap_pop round trip")
-
-    def test_pop_from_empty_raises(self) -> None:
-        with self.assertRaises(IndexError, msg="heap_pop on an empty list must raise IndexError"):
-            heap.heap_pop([])
-
-    def test_push_appends_then_sifts_not_inserts_at_front(self) -> None:
-        # A push that grows the array any way other than append-then-fix
-        # would still often look like a valid heap by luck; this checks
-        # the multiset AND size grew by exactly one real append.
-        values = [5.0, 6.0, 7.0]
-        heap.heap_push(values, 1.0)
-        self.assertEqual(len(values), 4, "heap_push must grow the list by exactly one element")
-        self.assertEqual(
-            Counter(values), Counter([5.0, 6.0, 7.0, 1.0]), "heap_push must not lose or duplicate a value"
-        )
+        while h:
+            popped.append(heap.heap_pop(h))
+            assert is_min_heap(h), f"heap invariant broken after a pop: {h}"
+        assert popped == sorted(items), f"popping everything should give {sorted(items)}, got {popped}"
 
 
-class TestHeapSort(unittest.TestCase):
-    def test_ascending_order_and_multiset_preserved(self) -> None:
-        for case in CASES:
-            with self.subTest(case=case[:5]):
-                result = heap.heap_sort(case)
-                assert_first_mismatch(self, result, sorted(case), "heap_sort ascending order")
-                self.assertEqual(
-                    Counter(result), Counter(case), "heap_sort must preserve the exact input multiset"
-                )
-
-    def test_does_not_mutate_input(self) -> None:
-        original = [3.0, 1.0, 2.0]
-        snapshot = list(original)
-        heap.heap_sort(original)
-        self.assertEqual(original, snapshot, "heap_sort must not mutate the list it was given")
+def test_heap_pop_on_empty_heap_raises_index_error():
+    try:
+        heap.heap_pop([])
+    except IndexError:
+        pass
+    else:
+        raise AssertionError("heap_pop([]) should raise IndexError")
+    single = [42]
+    assert heap.heap_pop(single) == 42 and single == [], f"popping a 1-element heap: {single}"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_heap_sort_matches_sorted_and_leaves_input_untouched():
+    for items in random_lists(seed=3):
+        original = list(items)
+        result = heap.heap_sort(items)
+        assert items == original, f"heap_sort mutated its input: {original} -> {items}"
+        assert result == sorted(original), f"heap_sort({original}) = {result}, expected {sorted(original)}"
+
+
+def test_heap_sort_orders_priority_cell_tuples_like_the_planner_uses():
+    frontier = [(5, (0, 0)), (3, (2, 1)), (3, (1, 4)), (7, (0, 1)), (3, (1, 2)), (4, (9, 9))]
+    result = heap.heap_sort(frontier)
+    assert result == sorted(frontier), f"heap_sort on (priority, cell) tuples: {result}"
+    assert result[0] == (3, (1, 2)), f"lowest priority with lowest cell should come first: {result[0]}"
+    rng = random.Random(4)
+    for _ in range(100):
+        entries = [(rng.randint(0, 6), (rng.randint(0, 4), rng.randint(0, 4))) for _ in range(rng.randint(1, 25))]
+        assert heap.heap_sort(entries) == sorted(entries), f"heap_sort tuples failed on {entries}"
+
+
+def test_heap_services_return_results_and_reject_bad_input():
+    values, ok, _ = heap_service._heapify_handler({"values": [5, -1, 3.5, 2, 2]})
+    assert ok is True and is_min_heap(values["heap"]), f"/heapify: {values}"
+    assert sorted(values["heap"]) == [-1, 2, 2, 3.5, 5], f"/heapify changed the values: {values}"
+
+    values, ok, _ = heap_service._heap_sort_handler({"numbers": [3, -1, 2.5, 3]})
+    assert ok is True and values == {"sorted": [-1, 2.5, 3, 3]}, f"/heap_sort: {values}"
+
+    values, ok, _ = heap_service._heap_sort_handler({"numbers": []})
+    assert ok is True and values == {"sorted": []}, f"/heap_sort of [] should succeed: {values}"
+
+    bad_cases = [
+        (heap_service._heapify_handler, {"numbers": [1, 2]}),
+        (heap_service._heapify_handler, {"values": [1, True]}),
+        (heap_service._heap_sort_handler, {"values": [1, 2]}),
+        (heap_service._heap_sort_handler, {"numbers": [1, "2"]}),
+        (heap_service._heap_sort_handler, {"numbers": [1, False]}),
+        (heap_service._heap_sort_handler, {"numbers": None}),
+        (heap_service._heap_sort_handler, {"numbers": {"a": 1}}),
+        (heap_service._heap_sort_handler, [3, 1, 2]),
+        (heap_service._heap_sort_handler, None),
+    ]
+    for handler, args in bad_cases:
+        _, ok, text = handler(args)
+        assert ok is False, f"{handler.__name__}({args!r}) should fail, got result {ok}"
